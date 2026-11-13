@@ -1,19 +1,41 @@
 {
   "manifest_version": 3,
   "name": "Cig",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Scrolling Twitter is a cigarette for your eyes. One burns down as you scroll.",
   "content_scripts": [
     {
-      "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["ext/loader.js"],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "ext/loader.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/overlay.js", "src/cigarette.js", "src/fx.js", "src/noise.js", "vendor/three/build/three.module.js"],
-      "matches": ["https://x.com/*", "https://twitter.com/*"]
+      "resources": [
+        "src/overlay.js",
+        "src/cigarette.js",
+        "src/fx.js",
+        "src/noise.js",
+        "src/pack.js",
+        "src/stats.js",
+        "src/panel.js",
+        "src/brands.js",
+        "src/vape.js",
+        "src/cloud.js",
+        "src/pace.js",
+        "src/packview.js",
+        "vendor/three/build/three.module.js"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ]
     }
   ]
 }

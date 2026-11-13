@@ -1,5 +1,7 @@
 import * as THREE from '../vendor/three/build/three.module.js';
+import { pace } from './pace.js';
 import { NOISE } from './noise.js';
+import { brand as getBrand } from './brands.js';
 
 // All lengths in centimetres. The cigarette lies along local +X: x = 0 is the mouth end.
 export const L = 8.4;        // total length
@@ -8,8 +10,6 @@ export const TIP = 3.0;      // tipping (cork) paper length
 export const END = TIP + 0.3; // burn stops here
 const PIVOT = 1.7;           // where the fingers would hold it; taps rotate about this
 const KEEP = 0.5;            // length of glowing coal left after ashing
-const IDLE_RATE = 0.0125;    // cm/s smoulder  (~7 min untouched)
-const DRAG_RATE = 0.22;      // extra cm/s at full inhale (~11 two-second drags)
 const SPIN = 0.2;            // idle yaw speed, rad/s
 const REST_TILT = 0.2;
 
@@ -89,12 +89,27 @@ void cigSurface(out vec3 pos, out vec3 nrm){
 
 const FRAG_PARS = /* glsl */ `
 uniform float uBurn, uHeat, uTime, uStain, uDissolve, uDead;
+uniform vec3 uPaper, uTipA, uTipB, uBandCol, uFilterCol, uPrintCol, uTobacco, uMint;
+uniform float uCork, uBandMetal, uBand1, uBand2, uCharcoal, uStars, uPop, uPopGlow;
 varying vec3 vP;
 varying float vKind;
 const float CR = ${R.toFixed(4)};
 const float TIPL = ${TIP.toFixed(4)};
 ${NOISE}
 struct CigSurf { vec3 albedo; float rough; float metal; float h; vec3 emis; };
+
+float sdStar5(vec2 p, float r, float rf){
+  const vec2 k1 = vec2(0.809016994, -0.587785252);
+  const vec2 k2 = vec2(-k1.x, k1.y);
+  p.x = abs(p.x);
+  p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+  p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+  p.x = abs(p.x);
+  p.y -= r;
+  vec2 ba = rf * vec2(-k1.y, k1.x) - vec2(0.0, 1.0);
+  float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+  return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+}
 
 float band(float x, float a, float b){ return smoothstep(a - 0.004, a + 0.004, x) * (1.0 - smoothstep(b - 0.004, b + 0.004, x)); }
 
@@ -119,38 +134,50 @@ CigSurf cigShade(){
 
   // ---- cigarette paper
   float fibre = fbm(P * vec3(26.0, 60.0, 60.0));
-  vec3 alb = vec3(0.90, 0.89, 0.86) * (0.93 + 0.09 * fibre);
+  vec3 alb = uPaper * (0.93 + 0.09 * fibre);
   alb *= 1.0 - 0.035 * smoothstep(0.7, 1.0, sin(x * 52.0));          // faint burn-rate rings
   float seam = 1.0 - smoothstep(0.0, 0.035, abs(atan(P.z, P.y) - 2.4));
   alb *= 1.0 - 0.05 * seam;
   float h = fibre * 0.0012 + seam * 0.002;
   float rough = 0.88, metal = 0.0;
 
-  // ---- cork tipping paper + gold lines
+  // ---- printed ring of stars just above the tipping
+  if (uStars > 0.5) {
+    const float SEG = 6.2831853 / 7.0;
+    float a = mod(atan(P.z, P.y) + SEG * 0.5, SEG) - SEG * 0.5;
+    float st = sdStar5(vec2(a * CR, x - TIPL - 0.32), 0.085, 0.45);
+    float ink = 1.0 - smoothstep(-0.004, 0.004, st);
+    alb = mix(alb, uPrintCol, ink * 0.92);
+  }
+
+  // ---- tipping paper (cork mottle or plain) + bands
   float tipM = 1.0 - smoothstep(TIPL - 0.006, TIPL + 0.006, x);
   float ck = vnoise(P * vec3(9.0, 46.0, 46.0) + 7.0);
   float ck2 = vnoise(P * vec3(24.0, 110.0, 110.0) + 2.0);
-  vec3 cork = mix(vec3(0.74, 0.46, 0.20), vec3(0.92, 0.72, 0.40), smoothstep(0.50, 0.72, ck));
-  cork *= 1.0 - 0.22 * smoothstep(0.68, 0.82, ck2);
+  vec3 cork = mix(uTipA, uTipB, mix(0.5, smoothstep(0.50, 0.72, ck), uCork));
+  cork *= 1.0 - 0.22 * uCork * smoothstep(0.68, 0.82, ck2);
+  cork = mix(cork, uMint, uPop * 0.35 * (1.0 - smoothstep(0.6, 1.6, abs(x - 1.5))));
   alb = mix(alb, cork, tipM);
   rough = mix(rough, 0.6, tipM);
   h += tipM * 0.006;
-  float gold = band(x, TIPL - 0.21, TIPL - 0.15) + band(x, TIPL - 0.09, TIPL - 0.065);
-  alb = mix(alb, vec3(1.0, 0.76, 0.33), gold);
-  metal = gold; rough = mix(rough, 0.3, gold);
+  float gold = band(x, TIPL - 0.21, TIPL - 0.15) * uBand1 + band(x, TIPL - 0.09, TIPL - 0.065) * uBand2;
+  alb = mix(alb, uBandCol, gold);
+  metal = gold * uBandMetal; rough = mix(rough, mix(0.55, 0.3, uBandMetal), gold);
 
   // ---- end faces
   if (rr < 0.99) {
     float face = 1.0 - smoothstep(0.90, 0.945, rr);
     if (vKind < 0.0) {                                               // filter
       float dots = vnoise(vec3(1.3, P.yz * 90.0));
-      vec3 fil = vec3(0.90, 0.88, 0.83) * (0.80 + 0.24 * dots);
+      vec3 fil = uFilterCol * (0.80 + 0.24 * dots);
+      float coalDots = smoothstep(0.55, 0.75, vnoise(vec3(7.7, P.yz * 70.0)));
+      fil = mix(fil, vec3(0.08), uCharcoal * coalDots * 0.85 * step(rr, 0.8));
       fil = mix(fil, vec3(0.62, 0.43, 0.20) * (0.8 + 0.3 * dots), uStain * (1.0 - rr * rr * 0.55) * 0.85);
       alb = mix(alb, fil, face); h += face * dots * 0.006;
     } else {                                                         // cut tobacco
       float t1 = fbm(vec3(x * 2.0, P.yz * 14.0) + 11.0);
       float t2 = vnoise(vec3(4.2, P.yz * 38.0));
-      vec3 tob = mix(vec3(0.19, 0.095, 0.03), vec3(0.58, 0.38, 0.15), smoothstep(0.3, 0.68, t1));
+      vec3 tob = mix(vec3(0.19, 0.095, 0.03), vec3(0.58, 0.38, 0.15), smoothstep(0.3, 0.68, t1)) * uTobacco;
       tob *= 0.3 + 0.7 * smoothstep(0.2, 0.5, t2);
       alb = mix(alb, tob, face); h += face * (t1 * 0.03 + t2 * 0.015);
     }
@@ -203,13 +230,38 @@ CigSurf cigShade(){
   float through = exp(-max(-d, 0.0) * 15.0) * (1.0 - burnt);
   glow += vec3(1.0, 0.27, 0.04) * through * uHeat * 0.3;
 
+  // menthol capsule crushed: a cold flash through the filter
+  glow += uMint * uPopGlow * 0.9 * (1.0 - smoothstep(0.4, 1.4, abs(x - 1.5))) * (1.0 - burnt);
+
   s.albedo = alb; s.rough = rough; s.metal = metal; s.h = h; s.emis = glow;
   return s;
 }
 `;
 
-function makeMaterial(timeU) {
+// per-brand uniforms, shared by the cigarette and its ash chunks
+export function makeBrandUniforms() {
+  const v3 = () => ({ value: new THREE.Vector3() });
+  return {
+    uPaper: v3(), uTipA: v3(), uTipB: v3(), uBandCol: v3(), uFilterCol: v3(), uPrintCol: v3(), uTobacco: v3(),
+    uMint: { value: new THREE.Vector3(0.55, 0.95, 0.82) },
+    uCork: { value: 1 }, uBandMetal: { value: 1 }, uBand1: { value: 1 }, uBand2: { value: 1 },
+    uCharcoal: { value: 0 }, uStars: { value: 0 }, uPop: { value: 0 }, uPopGlow: { value: 0 },
+  };
+}
+
+export function applyBrand(bu, b) {
+  const k = b.look;
+  bu.uPaper.value.fromArray(k.paper); bu.uTipA.value.fromArray(k.tipA); bu.uTipB.value.fromArray(k.tipB);
+  bu.uBandCol.value.fromArray(k.band); bu.uFilterCol.value.fromArray(k.filter); bu.uPrintCol.value.fromArray(k.print);
+  bu.uTobacco.value.fromArray(k.tobacco);
+  if (b.mint) bu.uMint.value.fromArray(b.mint);
+  bu.uCork.value = k.cork; bu.uBandMetal.value = k.bandMetal; bu.uBand1.value = k.bands[0]; bu.uBand2.value = k.bands[1];
+  bu.uCharcoal.value = k.charcoal; bu.uStars.value = k.stars;
+}
+
+function makeMaterial(timeU, brandU) {
   const u = {
+    ...brandU,
     uMin: { value: 0 }, uMax: { value: L }, uCapMin: { value: 0.004 }, uCapMax: { value: 0.004 },
     uBurn: { value: L + 0.3 }, uHeat: { value: 0 }, uTime: timeU, uStain: { value: 0 },
     uDissolve: { value: 0 }, uDead: { value: 0 }, uRagMin: { value: 0 }, uRagMax: { value: 0 },
@@ -248,7 +300,10 @@ export class Cigarette {
     scene.add(this.yawG); this.yawG.add(this.tiltG); this.tiltG.add(this.rollG);
     this.tiltG.position.x = PIVOT - L / 2;
 
-    const { mat, u } = makeMaterial(timeU);
+    this.brandU = makeBrandUniforms();
+    this.handlers = {};
+    this.setBrand(opts.brand || 'classic');
+    const { mat, u } = makeMaterial(timeU, this.brandU);
     this.u = u;
     this.mesh = new THREE.Mesh(this.geo, mat);
     this.mesh.frustumCulled = false;
@@ -257,7 +312,7 @@ export class Cigarette {
     // pool of falling ash chunks — same geometry + shader, clipped to a slice
     this.chunks = [];
     for (let i = 0; i < 8; i++) {
-      const m = makeMaterial(timeU);
+      const m = makeMaterial(timeU, this.brandU);
       const holder = new THREE.Group();
       const mesh = new THREE.Mesh(this.geo, m.mat);
       mesh.frustumCulled = false;
@@ -270,7 +325,42 @@ export class Cigarette {
     this.reset();
   }
 
+  on(name, fn) { (this.handlers[name] ||= []).push(fn); return this; }
+  _emit(name, ...a) { for (const fn of this.handlers[name] || []) fn(...a); }
+
+  setBrand(id) {
+    this.brand = getBrand(id);
+    applyBrand(this.brandU, this.brand);
+    this._syncSmoke();
+  }
+
+  get canPop() { return !!this.brand.capsule && !this.popped && (this.state === 'fresh' || this.state === 'lighting' || this.state === 'lit'); }
+
+  // crush the menthol capsule in the filter
+  pop() {
+    if (!this.canPop) return false;
+    this.popped = true; this.brandU.uPop.value = 1; this.popFlash = 1;
+    this._syncSmoke();
+    this._frame();
+    for (let k = 0; k < 10; k++) {
+      this.mesh.localToWorld(_v.set(1.5 + rnd(-0.4, 0.4), rnd(-R, R), rnd(-R, R)));
+      this.fx.smoke.spawn(_v.x, _v.y, _v.z, rnd(-0.6, 0.6), rnd(0.6, 1.6), rnd(-0.6, 0.6), rnd(1.2, 2.2), rnd(0.15, 0.3), rnd(1.0, 1.8), rnd(0.04, 0.07), 0, 0, 0);
+    }
+    this._emit('pop');
+    return true;
+  }
+
+  _syncSmoke() {
+    if (!this.fx.setTint) return;
+    const b = this.brand;
+    if (b.capsule && this.popped) this.fx.setTint(b.mint, 0.3);
+    else if (b.smoke) this.fx.setTint(b.smoke.tint, b.smoke.amount);
+    else this.fx.setTint([1, 1, 1], 0);
+  }
+
   reset() {
+    this.popped = false; this.popFlash = 0; this.brandU.uPop.value = 0; this.brandU.uPopGlow.value = 0;
+    this._syncSmoke();
     this.state = 'fresh';           // fresh → lighting → lit → stubbing → out
     this.burn = L + 0.3; this.tip = L; this.cap = 0.004;
     this.heat = 0; this.inhale = 0; this.lit = 0; this.dead = 0;
@@ -281,6 +371,7 @@ export class Cigarette {
     this.smokeAcc = 0; this.mouthAcc = 0; this.sparkAcc = 0; this.flakeAcc = 0;
     for (const c of this.chunks) { c.active = false; c.holder.visible = false; }
     this.fx.clear();
+    this._lastRemaining = this.remaining;
   }
 
   // pick up where a previous page left off
@@ -289,6 +380,7 @@ export class Cigarette {
     this.burn = Math.min(L - 0.16, Math.max(END, burn));
     if (out) { this.state = 'out'; this.tip = this.burn + 0.16; this.dead = 1; this.cap = 0.07; }
     else { this.state = 'lit'; this.lit = 1; this.tip = Math.min(L, this.burn + KEEP); this.cap = Math.min(0.42, (this.tip - this.burn) * 0.85); }
+    this._lastRemaining = this.remaining;
   }
 
   get ashLength() { return this.tip - this.burn; }
@@ -297,6 +389,7 @@ export class Cigarette {
   light() {
     if (this.state !== 'fresh') return;
     this.state = 'lighting'; this.clock = 0;
+    this._emit('light');
   }
 
   ash() {
@@ -308,6 +401,7 @@ export class Cigarette {
   stub() {
     if (this.state !== 'lit') return;
     this.state = 'stubbing'; this.clock = 0; this.impact = false; this.tapQ = null; this.ashTimer = 0;
+    this._emit('stub', 1 - this.remaining);
   }
 
   // world-space frame of the cigarette: axis (+X), perp (+Y of the tilt frame), side
@@ -393,11 +487,11 @@ export class Cigarette {
 
     /* ---- burning down */
     if (this.state === 'lit') {
-      this.burn -= (IDLE_RATE + this.inhale * DRAG_RATE) * dt;
+      this.burn -= (pace.idle + this.inhale * pace.drag) * dt;   // cm/s, see pace.js
       if (!this.dragging && this.inhale > 0.35) this.dragging = true;
       if (this.dragging) this.lungs += this.inhale * dt;
       if (this.dragging && this.inhale < 0.12) {
-        this.dragging = false; this.drags++;
+        this.dragging = false; this.drags++; this._emit('drag');
         this.puff = Math.min(1.4, this.puff + Math.min(this.lungs, 1.2)); this.lungs = 0;
         if (this.ashLength > KEEP + 0.85) this.ashTimer = 0.5;
       }
@@ -429,7 +523,7 @@ export class Cigarette {
         this.dead = cr; this.lit = 1 - cr;
         this.flakeAcc += win * 130 * dt;
       }
-      if (c > 2.9) { this.state = 'out'; this.poseMix = 0; this.poseY = 0; this.twist = 0; }
+      if (c > 2.9) { this.state = 'out'; this.poseMix = 0; this.poseY = 0; this.twist = 0; this._emit('out'); }
     }
     this.wisp = damp(this.wisp, 0, 1.6, dt);
 
@@ -500,8 +594,9 @@ export class Cigarette {
       smoke.spawn(_v.x, _v.y, _v.z, -_axis.x * 1.6, 1.2 - _axis.y * 1.6, -_axis.z * 1.6,
         rnd(2.2, 3.4), rnd(0.25, 0.4), rnd(1.6, 2.6), rnd(0.05, 0.09), 0, 0, rnd(dt));
     }
-    // sparks while pulling hard
-    this.sparkAcc += (burning ? Math.max(0, this.inhale - 0.3) * 7 : 0) * dt;
+    // sparks while pulling hard (clove keeps popping even at rest)
+    const crackle = this.brand.crackle ? this.lit * this.brand.crackle * (0.9 + 9 * this.inhale) : 0;
+    this.sparkAcc += (burning ? Math.max(0, this.inhale - 0.3) * 7 + crackle : 0) * dt;
     while (this.sparkAcc >= 1) {
       this.sparkAcc -= 1;
       const th = rnd(Math.PI * 2);
@@ -539,6 +634,13 @@ export class Cigarette {
       }
       if (c.age > 1.1) { c.active = false; c.holder.visible = false; }
     }
+
+    /* ---- bookkeeping */
+    const rem = this.remaining;
+    if (rem < this._lastRemaining && (burning || this.state === 'stubbing')) this._emit('burn', this._lastRemaining - rem);
+    this._lastRemaining = rem;
+    this.popFlash = damp(this.popFlash, 0, 0.35, dt);
+    this.brandU.uPopGlow.value = this.popFlash;
 
     /* ---- lighter flame */
     this.fx.setFlame(tipW, flameA, flameRise);

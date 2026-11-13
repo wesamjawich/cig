@@ -25,6 +25,13 @@
     border-color: rgba(255,150,80,.5); color: #fff; transform: scale(.97); }
   #ui button:disabled { opacity: .28; cursor: default; }
   #ui button:focus-visible { outline: 1px solid rgba(255,170,110,.8); outline-offset: 2px; }
+  #ui button[hidden] { display: none; }
+  #ui #pop { color: #c9fff0; border-color: rgba(120,240,200,.35); }
+  #hud { position: fixed; left: 22px; top: 18px; user-select: none; pointer-events: none;
+    font: 500 11px/1.6 ui-sans-serif, system-ui, -apple-system, "Helvetica Neue", sans-serif; letter-spacing: .08em;
+    text-transform: uppercase; color: rgba(255,255,255,.5); }
+  #hud b { color: rgba(255,255,255,.88); font-weight: 600; font-variant-numeric: tabular-nums; }
+  #hud span { display: block; color: rgba(255,255,255,.32); }
 </style>
 <script type="importmap">
 { "imports": {
@@ -36,11 +43,14 @@
 <body>
 <canvas id="c"></canvas>
 <div id="vignette"></div>
+<div id="hud"></div>
 <div id="ui">
   <button id="light" title="L">Light</button>
   <button id="drag" title="Hold — or scroll / hold Space">Drag</button>
   <button id="ash" title="A">Ash</button>
   <button id="stub" title="S">Stub</button>
+  <button id="pop" title="P — crush the menthol capsule" hidden>Pop</button>
+  <button id="stats" title="T — or click the pack. B cycles brands">Stats</button>
 </div>
 <script type="module" src="./src/main.js"></script>
 </body>

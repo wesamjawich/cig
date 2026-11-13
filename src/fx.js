@@ -24,7 +24,8 @@ varying vec2 vUv; varying float vAlpha; varying float vSeed; varying float vAgeN
 ${NOISE}`;
 
 const SMOKE_FRAG = HEAD + /* glsl */ `
-uniform float uDark;
+uniform float uDark, uTintAmt;
+uniform vec3 uTint;
 void main(){
   float r = length(vUv);
   if (r >= 1.0) discard;
@@ -33,6 +34,7 @@ void main(){
   float wisp = mix(1.0, 0.35 + 1.3 * smoothstep(0.2, 0.8, n), smoothstep(0.15, 0.7, vAgeN));
   vec3 col = mix(vec3(0.50, 0.56, 0.68), vec3(0.80, 0.83, 0.88), n);
   col = mix(col, vec3(1.0, 0.45, 0.16) * 1.4, vExtra * pow(1.0 - vAgeN, 14.0) * 0.5);
+  col = mix(col, uTint * (0.85 + 0.25 * n), uTintAmt);
   col = mix(col, vec3(0.16, 0.165, 0.18) + 0.1 * n, uDark);
   gl_FragColor = vec4(col, g * wisp * vAlpha * (1.0 + 0.6 * uDark));
   #include <tonemapping_fragment>
@@ -151,7 +153,7 @@ void main(){
 const QUAD_VERT = 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }';
 
 export function createFx(scene, camera, opts = {}) {
-  const smokeU = { uDark: { value: 0 } };
+  const smokeU = { uDark: { value: 0 }, uTint: { value: new THREE.Vector3(1, 1, 1) }, uTintAmt: { value: 0 } };
   const smoke = new Sprites(2000, SMOKE_FRAG, {
     order: 1, uniforms: smokeU,
     curve(d, o, a, out) {
@@ -221,6 +223,7 @@ export function createFx(scene, camera, opts = {}) {
     smoke, flakes, sparks,
     get count() { return smoke.geo.instanceCount + flakes.geo.instanceCount + sparks.geo.instanceCount; },
     setDark(v) { smokeU.uDark.value = v; },
+    setTint(rgb, amount) { smokeU.uTint.value.fromArray(rgb); smokeU.uTintAmt.value = amount; },
     setGlow(pos, heat) {
       glow.visible = !!opts.glow && heat > 0.01;
       if (!glow.visible) return;
